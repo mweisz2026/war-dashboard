@@ -15,13 +15,6 @@ const HEADERS = {
 
 // ── Current quotes via v8 chart API (one request per symbol, more reliable) ──
 
-interface YahooChartMeta {
-  regularMarketPrice?: number;
-  previousClose?: number;
-  chartPreviousClose?: number;
-  currency?: string;
-}
-
 async function fetchSingleQuote(symbol: string): Promise<{ price: number; change: number; changePercent: number } | null> {
   const url =
     `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}` +
@@ -30,7 +23,7 @@ async function fetchSingleQuote(symbol: string): Promise<{ price: number; change
     const res = await fetch(url, { headers: HEADERS });
     if (!res.ok) return null;
     const data: YahooChartResponse = await res.json();
-    const meta = data.chart?.result?.[0]?.meta as YahooChartMeta | undefined;
+    const meta = data.chart?.result?.[0]?.meta;
     if (!meta?.regularMarketPrice) return null;
     const price = meta.regularMarketPrice;
     const prevClose = meta.previousClose ?? meta.chartPreviousClose ?? price;
@@ -96,6 +89,12 @@ function getPeriodStart(period: Period, customStart?: string): Date {
 interface YahooChartResponse {
   chart: {
     result?: Array<{
+      meta: {
+        regularMarketPrice?: number;
+        previousClose?: number;
+        chartPreviousClose?: number;
+        currency?: string;
+      };
       timestamp: number[];
       indicators: {
         quote: Array<{
