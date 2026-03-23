@@ -6,70 +6,51 @@ import type { Quote, HistoricalPoint } from './types';
 import { YAHOO_TICKERS } from './tickers';
 
 const HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (compatible; war-dashboard/1.0)',
-  'Accept': 'application/json',
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Accept': 'application/json, text/plain, */*',
+  'Accept-Language': 'en-US,en;q=0.9',
+  'Origin': 'https://finance.yahoo.com',
+  'Referer': 'https://finance.yahoo.com/',
 };
 
-// ── Current quotes via v7 batch endpoint ─────────────────────────────────────
+// ── Current quotes via v8 chart API (one request per symbol, more reliable) ──
 
-interface YahooQuoteResult {
-  symbol: string;
+interface YahooChartMeta {
   regularMarketPrice?: number;
-  regularMarketChange?: number;
-  regularMarketChangePercent?: number;
-  shortName?: string;
-  longName?: string;
+  previousClose?: number;
+  chartPreviousClose?: number;
+  currency?: string;
 }
 
-interface YahooQuoteResponse {
-  quoteResponse: {
-    result: YahooQuoteResult[];
-    error: unknown;
-  };
+async function fetchSingleQuote(symbol: string): Promise<{ price: number; change: number; changePercent: number } | null> {
+  const url =
+    `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}` +
+    `?interval=1d&range=1d`;
+  try {
+    const res = await fetch(url, { headers: HEADERS });
+    if (!res.ok) return null;
+    const data: YahooChartResponse = await res.json();
+    const meta = data.chart?.result?.[0]?.meta as YahooChartMeta | undefined;
+    if (!meta?.regularMarketPrice) return null;
+    const price = meta.regularMarketPrice;
+    const prevClose = meta.previousClose ?? meta.chartPreviousClose ?? price;
+    const change = price - prevClose;
+    const changePercent = prevClose !== 0 ? (change / prevClose) * 100 : 0;
+    return { price, change, changePercent };
+  } catch {
+    return null;
+  }
 }
 
 export async function fetchAllQuotes(): Promise<Quote[]> {
-  // Yahoo allows batch quote requests, up to ~200 symbols at once
-  const symbols = YAHOO_TICKERS.map((t) => t.symbol).join(',');
-  const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbols)}&fields=regularMarketPrice,regularMarketChange,regularMarketChangePercent`;
+  const results = await Promise.allSettled(
+    YAHOO_TICKERS.map((ticker) => fetchSingleQuote(ticker.symbol))
+  );
 
-  let rawResults: YahooQuoteResult[] = [];
-  try {
-    const res = await fetch(url, { headers: HEADERS });
-    if (res.ok) {
-      const data: YahooQuoteResponse = await res.json();
-      rawResults = data.quoteResponse?.result ?? [];
-    }
-  } catch {
-    // Will fall back to per-ticker fetch below
-  }
-
-  // If batch failed or returned partial results, fill in gaps individually
-  const resultMap = new Map(rawResults.map((r) => [r.symbol, r]));
-
-  const missing = YAHOO_TICKERS.filter((t) => !resultMap.has(t.symbol));
-  if (missing.length > 0) {
-    const individual = await Promise.allSettled(
-      missing.map(async (ticker) => {
-        const r = await fetch(
-          `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(ticker.symbol)}`,
-          { headers: HEADERS }
-        );
-        if (!r.ok) throw new Error(`${r.status}`);
-        const d: YahooQuoteResponse = await r.json();
-        return d.quoteResponse?.result?.[0];
-      })
-    );
-    individual.forEach((r, i) => {
-      if (r.status === 'fulfilled' && r.value) {
-        resultMap.set(missing[i].symbol, r.value);
-      }
-    });
-  }
-
-  return YAHOO_TICKERS.map((ticker): Quote => {
-    const q = resultMap.get(ticker.symbol);
-    if (!q) {
+  return YAHOO_TICKERS.map((ticker, i): Quote => {
+    const r = results[i];
+    const data = r.status === 'fulfilled' ? r.value : null;
+    if (!data) {
       return {
         symbol: ticker.symbol,
         name: ticker.name,
@@ -79,16 +60,16 @@ export async function fetchAllQuotes(): Promise<Quote[]> {
         changePercent: 0,
         unit: ticker.unit,
         source: 'yahoo',
-        error: 'Not found',
+        error: 'No data',
       };
     }
     return {
       symbol: ticker.symbol,
       name: ticker.name,
       category: ticker.category,
-      price: q.regularMarketPrice ?? 0,
-      change: q.regularMarketChange ?? 0,
-      changePercent: q.regularMarketChangePercent ?? 0,
+      price: data.price,
+      change: data.change,
+      changePercent: data.changePercent,
       unit: ticker.unit,
       source: 'yahoo',
     };
