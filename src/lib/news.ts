@@ -5,6 +5,7 @@ const parser = new Parser({ timeout: 8000 });
 
 const FEEDS = [
   { url: 'https://feeds.reuters.com/reuters/worldNews',                          source: 'Reuters' },
+  { url: 'https://feeds.reuters.com/reuters/businessNews',                       source: 'Reuters' },
   { url: 'https://www.timesofisrael.com/feed/',                                  source: 'Times of Israel' },
   { url: 'https://www.jpost.com/rss/rssfeedsFrontPage.aspx',                     source: 'Jerusalem Post' },
   { url: 'https://www.aljazeera.com/xml/rss/all.xml',                            source: 'Al Jazeera' },
@@ -12,6 +13,10 @@ const FEEDS = [
   { url: 'https://feeds.bbci.co.uk/news/world/rss.xml',                         source: 'BBC World' },
   { url: 'https://api.axios.com/feed/',                                          source: 'Axios' },
   { url: 'https://feeds.a.wsj.com/wsj/xml/rss/3_7085.xml',                      source: 'WSJ Markets' },
+  { url: 'https://feeds.a.wsj.com/wsj/xml/rss/3_7011.xml',                      source: 'WSJ World' },
+  { url: 'https://www.ft.com/rss/home',                                          source: 'FT' },
+  { url: 'https://feeds.bloomberg.com/markets/news.rss',                         source: 'Bloomberg' },
+  { url: 'https://feeds.bloomberg.com/politics/news.rss',                        source: 'Bloomberg' },
   { url: 'https://www.haaretz.com/arc/outboundfeeds/rss/?outputType=xml',        source: 'Haaretz' },
   { url: 'https://rss.ap.org/article/world-news',                                source: 'AP' },
 ];
