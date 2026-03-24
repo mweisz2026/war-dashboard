@@ -49,13 +49,18 @@ function BannerTicker({ quote }: { quote: Quote }) {
 }
 
 function CategorySection({
-  label, description, quotes, onTickerClick, selectedSymbol,
+  label, description, quotes, onTickerClick, selectedSymbol, flashMap,
 }: {
   label: string; description: string; quotes: Quote[];
   onTickerClick: (q: Quote) => void; selectedSymbol?: string;
+  flashMap: Record<string, 'up' | 'down'>;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   if (quotes.length === 0) return null;
+
+  // Category-level summary: count of movers
+  const up   = quotes.filter(q => q.changePercent > 0).length;
+  const down = quotes.filter(q => q.changePercent < 0).length;
 
   return (
     <section className="mb-6">
@@ -71,7 +76,9 @@ function CategorySection({
           — {description}
         </span>
         <div className="flex-1 border-t border-border/30 ml-1" />
-        <span className="text-[9px] text-muted/40 font-mono">{quotes.length}</span>
+        {/* Up/down mover count */}
+        <span className="text-[9px] font-mono text-up/70">{up}▲</span>
+        <span className="text-[9px] font-mono text-down/70">{down}▼</span>
       </button>
 
       {!collapsed && (
@@ -82,6 +89,7 @@ function CategorySection({
               quote={q}
               onClick={onTickerClick}
               isSelected={selectedSymbol === q.symbol}
+              flash={flashMap[q.symbol]}
             />
           ))}
         </div>
@@ -96,6 +104,8 @@ export default function Dashboard({ initialSnapshot, initialNews }: Props) {
   const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
   const [isPending, setIsPending] = useState(false);
   const [refreshError, setRefreshError] = useState(false);
+  // Track which symbols changed price direction on last refresh for flash animation
+  const [flashMap, setFlashMap] = useState<Record<string, 'up' | 'down'>>({});
   const abortRef = useRef<AbortController | null>(null);
 
   const refresh = useCallback(async () => {
@@ -110,7 +120,20 @@ export default function Dashboard({ initialSnapshot, initialNews }: Props) {
       ]);
       if (!mRes.ok || !nRes.ok) throw new Error('Fetch failed');
       const [mData, nData] = await Promise.all([mRes.json(), nRes.json()]);
-      setSnapshot(mData);
+      // Compute which prices changed direction for flash effect
+      setSnapshot(prev => {
+        const prevMap = Object.fromEntries(prev.quotes.map(q => [q.symbol, q.price]));
+        const newFlash: Record<string, 'up' | 'down'> = {};
+        for (const q of (mData as MarketSnapshot).quotes) {
+          const old = prevMap[q.symbol];
+          if (old != null && q.price > 0 && old !== q.price) {
+            newFlash[q.symbol] = q.price > old ? 'up' : 'down';
+          }
+        }
+        setFlashMap(newFlash);
+        setTimeout(() => setFlashMap({}), 900);
+        return mData as MarketSnapshot;
+      });
       setNews(nData.news ?? []);
     } catch (e: unknown) {
       if (e instanceof Error && e.name !== 'AbortError') setRefreshError(true);
@@ -190,6 +213,7 @@ export default function Dashboard({ initialSnapshot, initialNews }: Props) {
                 quotes={snapshot.quotes.filter(q => q.category === key)}
                 onTickerClick={setSelectedQuote}
                 selectedSymbol={selectedQuote?.symbol}
+                flashMap={flashMap}
               />
             ))}
           </main>

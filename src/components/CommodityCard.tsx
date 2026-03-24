@@ -7,6 +7,7 @@ interface Props {
   quote: Quote;
   onClick: (quote: Quote) => void;
   isSelected: boolean;
+  flash?: 'up' | 'down';
 }
 
 function fmtPrice(n: number): string {
@@ -34,7 +35,7 @@ function intensityClass(pct: number, isUp: boolean, isDown: boolean): string {
   return isUp ? 'border-up/25 bg-gradient-to-br from-up/6 to-transparent' : 'border-down/25 bg-gradient-to-br from-down/6 to-transparent';
 }
 
-export default function CommodityCard({ quote, onClick, isSelected }: Props) {
+export default function CommodityCard({ quote, onClick, isSelected, flash }: Props) {
   const isUp    = quote.changePercent > 0;
   const isDown  = quote.changePercent < 0;
   const hasData = quote.price > 0;
@@ -61,6 +62,8 @@ export default function CommodityCard({ quote, onClick, isSelected }: Props) {
         'hover:scale-[1.01] hover:shadow-lg focus:outline-none',
         isSelected && 'ring-1 ring-accent',
         !hasData && 'opacity-40',
+        flash === 'up'   && 'flash-up',
+        flash === 'down' && 'flash-down',
         intensityClass(quote.changePercent, isUp, isDown),
       )}
     >

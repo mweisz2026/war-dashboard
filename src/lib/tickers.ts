@@ -78,8 +78,11 @@ export const YAHOO_TICKERS: TickerConfig[] = [
 ];
 
 export const FRED_SERIES: TickerConfig[] = [
-  { symbol: 'DGS10',        name: '10Y Treasury',   category: 'Macro', unit: '%',   source: 'fred' },
-  { symbol: 'BAMLH0A0HYM2', name: 'HY OAS',         category: 'Macro', unit: 'bps', source: 'fred' },
+  { symbol: 'DGS10',        name: '10Y Treasury',        category: 'Macro', unit: '%',   source: 'fred' },
+  { symbol: 'DGS2',         name: '2Y Treasury',         category: 'Macro', unit: '%',   source: 'fred' },
+  { symbol: 'T10YIE',       name: '10Y Breakeven Infl',  category: 'Macro', unit: '%',   source: 'fred' },
+  { symbol: 'BAMLH0A0HYM2', name: 'HY Credit Spread',    category: 'Macro', unit: 'bps', source: 'fred' },
+  { symbol: 'BAMLC0A0CM',   name: 'IG Credit Spread',    category: 'Macro', unit: 'bps', source: 'fred' },
 ];
 
 export const ALL_TICKERS = [...YAHOO_TICKERS, ...FRED_SERIES];

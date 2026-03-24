@@ -11,24 +11,43 @@
 html {
   background-color: #0d1117;
   color: #e6edf3;
-}
-
-/* Custom scrollbar */
-.scrollbar-thin::-webkit-scrollbar {
-  width: 4px;
-}
-.scrollbar-thin::-webkit-scrollbar-track {
-  background: transparent;
-}
-.scrollbar-thin::-webkit-scrollbar-thumb {
-  background: #30363d;
-  border-radius: 2px;
-}
-.scrollbar-thin::-webkit-scrollbar-thumb:hover {
-  background: #8b949e;
-}
-
-/* Smooth scrolling */
-html {
   scroll-behavior: smooth;
+}
+
+/* Tabular numbers everywhere numbers appear */
+.font-mono, .tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Custom scrollbar — thin, unobtrusive */
+::-webkit-scrollbar        { width: 4px; height: 4px; }
+::-webkit-scrollbar-track  { background: transparent; }
+::-webkit-scrollbar-thumb  { background: #30363d; border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: #8b949e; }
+
+/* Flash animation — fires when a price card's value updates */
+@keyframes flash-up {
+  0%   { background-color: rgba(63, 185, 80, 0.20); }
+  100% { background-color: transparent; }
+}
+@keyframes flash-down {
+  0%   { background-color: rgba(248, 81, 73, 0.20); }
+  100% { background-color: transparent; }
+}
+.flash-up   { animation: flash-up   0.8s ease-out; }
+.flash-down { animation: flash-down 0.8s ease-out; }
+
+/* Subtle scanline texture on the header */
+header::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0,0,0,0.04) 2px,
+    rgba(0,0,0,0.04) 4px
+  );
+  pointer-events: none;
 }
