@@ -95,12 +95,61 @@ async function fetchFromYahoo(symbol: string, host: string): Promise<PriceData |
   } catch { return null; }
 }
 
+// ── Twelve Data fallback ──────────────────────────────────────────────────────
+// Maps Yahoo symbols → Twelve Data symbols (covers futures + forex + indices)
+
+const TWELVE_DATA_MAP: Record<string, string> = {
+  'CL=F': 'WTI/USD',    'BZ=F': 'BRENT/USD',  'NG=F': 'XNG/USD',
+  'RB=F': 'RBOB/USD',   'HO=F': 'HO/USD',
+  'GC=F': 'XAU/USD',    'SI=F': 'XAG/USD',    'PA=F': 'XPD/USD',  'PL=F': 'XPT/USD',
+  'HG=F': 'XCU/USD',
+  'ZC=F': 'CORN/USD',   'ZS=F': 'SOYBEAN/USD','ZW=F': 'WHEAT/USD',
+  'KC=F': 'COFFEE/USD', 'SB=F': 'SUGAR/USD',  'CT=F': 'COTTON/USD', 'CC=F': 'COCOA/USD',
+  'ILS=X': 'USD/ILS',   'DX-Y.NYB': 'DXY',
+  '^VIX':  'VIX',       '^OVX': 'OVX',
+};
+
+async function fetchTwelveData(yahooSymbol: string): Promise<PriceData | null> {
+  const apiKey = process.env.TWELVE_DATA_API_KEY;
+  if (!apiKey) return null;
+  const symbol = TWELVE_DATA_MAP[yahooSymbol];
+  if (!symbol) return null;
+  try {
+    const res = await fetch(
+      `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(symbol)}&apikey=${apiKey}`,
+      { headers: { Accept: 'application/json' } }
+    );
+    if (!res.ok) return null;
+    const d: {
+      close?: string; previous_close?: string; change?: string; percent_change?: string;
+      high?: string; low?: string; fifty_two_week?: { high?: string; low?: string };
+      status?: string;
+    } = await res.json();
+    if (d.status === 'error' || !d.close) return null;
+    const price = parseFloat(d.close);
+    const prevClose = parseFloat(d.previous_close ?? d.close);
+    if (!price) return null;
+    return {
+      price,
+      change: parseFloat(d.change ?? '0'),
+      changePercent: parseFloat(d.percent_change ?? '0'),
+      dayHigh: d.high ? parseFloat(d.high) : undefined,
+      dayLow:  d.low  ? parseFloat(d.low)  : undefined,
+      weekHigh52: d.fifty_two_week?.high ? parseFloat(d.fifty_two_week.high) : undefined,
+      weekLow52:  d.fifty_two_week?.low  ? parseFloat(d.fifty_two_week.low)  : undefined,
+    };
+    void prevClose;
+  } catch { return null; }
+}
+
 async function fetchSingleQuote(symbol: string): Promise<PriceData | null> {
   const q1 = await fetchFromYahoo(symbol, 'query1.finance.yahoo.com');
   if (q1) return q1;
   const q2 = await fetchFromYahoo(symbol, 'query2.finance.yahoo.com');
   if (q2) return q2;
-  return fetchFinnhub(symbol);
+  const finnhub = await fetchFinnhub(symbol);
+  if (finnhub) return finnhub;
+  return fetchTwelveData(symbol);
 }
 
 export async function fetchAllQuotes(): Promise<Quote[]> {

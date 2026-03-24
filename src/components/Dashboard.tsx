@@ -26,12 +26,23 @@ function fmt(price: number) {
 function BannerTicker({ quote }: { quote: Quote }) {
   const isUp = quote.changePercent > 0;
   const isDown = quote.changePercent < 0;
+  const abs = Math.abs(quote.changePercent);
+  // Color intensifies with magnitude
+  const pctColor = isUp
+    ? abs >= 3 ? 'text-up font-bold' : 'text-up'
+    : isDown
+    ? abs >= 3 ? 'text-down font-bold' : 'text-down'
+    : 'text-muted';
   return (
-    <div className="flex flex-col items-center px-3 py-2 border-r border-border/50 last:border-0 min-w-[95px]">
-      <span className="text-[9px] text-muted font-mono uppercase tracking-wider truncate w-full text-center">{quote.name}</span>
-      <span className="text-sm font-mono font-bold text-text mt-0.5">{fmt(quote.price)}</span>
-      <span className={clsx('text-[10px] font-mono', isUp ? 'text-up' : isDown ? 'text-down' : 'text-muted')}>
-        {isUp ? '▲' : isDown ? '▼' : '—'}{Math.abs(quote.changePercent).toFixed(2)}%
+    <div className={clsx(
+      'flex flex-col items-center px-3 py-2 border-r border-border/40 last:border-0 min-w-[100px] transition-colors',
+      isUp && abs >= 2 && 'bg-up/5',
+      isDown && abs >= 2 && 'bg-down/5',
+    )}>
+      <span className="text-[9px] text-muted/70 font-mono uppercase tracking-wider truncate w-full text-center">{quote.name}</span>
+      <span className="text-sm font-mono font-bold text-text mt-0.5 tabular-nums">{fmt(quote.price)}</span>
+      <span className={clsx('text-[10px] font-mono tabular-nums', pctColor)}>
+        {isUp ? '▲' : isDown ? '▼' : '—'}{abs.toFixed(2)}%
       </span>
     </div>
   );
@@ -117,11 +128,21 @@ export default function Dashboard({ initialSnapshot, initialNews }: Props) {
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <header className="border-b border-border bg-surface/60 backdrop-blur sticky top-0 z-40">
         <div className="max-w-[1800px] mx-auto px-4 py-2.5 flex items-center justify-between flex-wrap gap-2">
-          <div>
-            <h1 className="text-base font-bold font-mono text-text tracking-tight">
-              ⚔️ War Impact Commodity Tracker
-            </h1>
-            <p className="text-[10px] text-muted font-mono">Iran · Israel · US — Live commodity & market impact</p>
+          <div className="flex items-center gap-3">
+            <div>
+              <h1 className="text-base font-bold font-mono text-text tracking-tight">
+                ⚔️ War Impact Commodity Tracker
+              </h1>
+              <p className="text-[10px] text-muted font-mono">Iran · Israel · US — Commodity & market impact</p>
+            </div>
+            {/* Live pulse indicator */}
+            <div className="hidden sm:flex items-center gap-1.5 px-2 py-1 rounded-md bg-up/10 border border-up/20">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-up opacity-75" />
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-up" />
+              </span>
+              <span className="text-[9px] font-mono text-up/80 uppercase tracking-wider">Live</span>
+            </div>
           </div>
           <div className="flex items-center gap-3">
             {refreshError && (
@@ -129,9 +150,12 @@ export default function Dashboard({ initialSnapshot, initialNews }: Props) {
                 <AlertCircle size={10} /> Refresh failed
               </span>
             )}
-            <span className="text-[10px] text-muted font-mono hidden sm:block">
-              {new Date(snapshot.timestamp).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-            </span>
+            <div className="hidden sm:block text-right">
+              <div className="text-[10px] text-muted font-mono">
+                {new Date(snapshot.timestamp).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' })}
+              </div>
+              <div className="text-[9px] text-muted/50 font-mono">Yahoo · FRED · Finnhub</div>
+            </div>
             <button
               onClick={refresh}
               disabled={isPending}

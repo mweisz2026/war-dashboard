@@ -25,6 +25,15 @@ function fmtChange(n: number): string {
   return `${sign}${n.toFixed(4)}`;
 }
 
+// Intensity color based on magnitude of move
+function intensityClass(pct: number, isUp: boolean, isDown: boolean): string {
+  const abs = Math.abs(pct);
+  if (!isUp && !isDown) return 'border-border bg-surface';
+  if (abs >= 5)  return isUp ? 'border-up/60 bg-gradient-to-br from-up/20 to-up/5'   : 'border-down/60 bg-gradient-to-br from-down/20 to-down/5';
+  if (abs >= 2)  return isUp ? 'border-up/40 bg-gradient-to-br from-up/12 to-up/3'   : 'border-down/40 bg-gradient-to-br from-down/12 to-down/3';
+  return isUp ? 'border-up/25 bg-gradient-to-br from-up/6 to-transparent' : 'border-down/25 bg-gradient-to-br from-down/6 to-transparent';
+}
+
 export default function CommodityCard({ quote, onClick, isSelected }: Props) {
   const isUp    = quote.changePercent > 0;
   const isDown  = quote.changePercent < 0;
@@ -37,6 +46,13 @@ export default function CommodityCard({ quote, onClick, isSelected }: Props) {
     ? Math.max(0, Math.min(100, ((quote.price - quote.weekLow52!) / (quote.weekHigh52! - quote.weekLow52!)) * 100))
     : null;
 
+  // Day high/low position
+  const hasDayRange = hasData && quote.dayHigh != null && quote.dayLow != null
+    && quote.dayHigh > quote.dayLow;
+  const pctDay = hasDayRange
+    ? Math.max(0, Math.min(100, ((quote.price - quote.dayLow!) / (quote.dayHigh! - quote.dayLow!)) * 100))
+    : null;
+
   return (
     <button
       onClick={() => onClick(quote)}
@@ -45,9 +61,7 @@ export default function CommodityCard({ quote, onClick, isSelected }: Props) {
         'hover:scale-[1.01] hover:shadow-lg focus:outline-none',
         isSelected && 'ring-1 ring-accent',
         !hasData && 'opacity-40',
-        isUp   && 'border-up/25 bg-gradient-to-br from-up/5 to-transparent',
-        isDown && 'border-down/25 bg-gradient-to-br from-down/5 to-transparent',
-        !isUp && !isDown && 'border-border bg-surface',
+        intensityClass(quote.changePercent, isUp, isDown),
       )}
     >
       {/* Name + change badge */}
@@ -80,23 +94,45 @@ export default function CommodityCard({ quote, onClick, isSelected }: Props) {
       {/* Change amount */}
       {hasData && (
         <div className={clsx(
-          'text-[10px] font-mono mb-3',
+          'text-[10px] font-mono mb-2',
           isUp ? 'text-up' : isDown ? 'text-down' : 'text-muted'
         )}>
           {fmtChange(quote.change)} today
         </div>
       )}
 
+      {/* Day Range bar */}
+      {pctDay !== null && (
+        <div className="mb-2">
+          <div className="flex justify-between text-[8px] text-muted/50 font-mono mb-0.5">
+            <span>{fmtPrice(quote.dayLow!)}</span>
+            <span className="text-muted/35">Day</span>
+            <span>{fmtPrice(quote.dayHigh!)}</span>
+          </div>
+          <div className="relative h-0.5 bg-border/40 rounded-full">
+            <div
+              className={clsx('absolute inset-y-0 left-0 rounded-full opacity-40',
+                isUp ? 'bg-up' : isDown ? 'bg-down' : 'bg-muted')}
+              style={{ width: `${pctDay}%` }}
+            />
+            <div
+              className={clsx('absolute top-1/2 w-1.5 h-1.5 rounded-full border border-bg',
+                isUp ? 'bg-up' : isDown ? 'bg-down' : 'bg-muted')}
+              style={{ left: `${pctDay}%`, transform: 'translate(-50%, -50%)' }}
+            />
+          </div>
+        </div>
+      )}
+
       {/* 52-Week Range Bar */}
       {pct52w !== null ? (
         <div>
-          <div className="flex justify-between text-[8px] text-muted/60 font-mono mb-1">
+          <div className="flex justify-between text-[8px] text-muted/50 font-mono mb-0.5">
             <span>{fmtPrice(quote.weekLow52!)}</span>
-            <span className="text-muted/40">52W</span>
+            <span className="text-muted/35">52W</span>
             <span>{fmtPrice(quote.weekHigh52!)}</span>
           </div>
-          <div className="relative h-1 bg-border/60 rounded-full">
-            {/* Filled bar */}
+          <div className="relative h-1 bg-border/50 rounded-full">
             <div
               className={clsx(
                 'absolute inset-y-0 left-0 rounded-full opacity-50',
@@ -104,7 +140,6 @@ export default function CommodityCard({ quote, onClick, isSelected }: Props) {
               )}
               style={{ width: `${pct52w}%` }}
             />
-            {/* Marker dot */}
             <div
               className={clsx(
                 'absolute top-1/2 w-2 h-2 rounded-full border border-bg shadow',
@@ -116,7 +151,7 @@ export default function CommodityCard({ quote, onClick, isSelected }: Props) {
         </div>
       ) : (
         hasData && (
-          <div className="h-1 bg-border/30 rounded-full" title="52W range unavailable" />
+          <div className="h-1 bg-border/20 rounded-full" title="52W range unavailable" />
         )
       )}
     </button>

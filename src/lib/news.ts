@@ -4,77 +4,122 @@ import type { NewsItem } from './types';
 const parser = new Parser({ timeout: 8000 });
 
 const FEEDS = [
+  // ── Direct regional sources ────────────────────────────────────────────────
   { url: 'https://feeds.reuters.com/reuters/worldNews',                          source: 'Reuters' },
   { url: 'https://feeds.reuters.com/reuters/businessNews',                       source: 'Reuters' },
   { url: 'https://www.timesofisrael.com/feed/',                                  source: 'Times of Israel' },
   { url: 'https://www.jpost.com/rss/rssfeedsFrontPage.aspx',                     source: 'Jerusalem Post' },
   { url: 'https://www.aljazeera.com/xml/rss/all.xml',                            source: 'Al Jazeera' },
+  { url: 'https://www.haaretz.com/arc/outboundfeeds/rss/?outputType=xml',        source: 'Haaretz' },
   { url: 'https://breakingdefense.com/feed/',                                    source: 'Breaking Defense' },
+  // ── Broad international ────────────────────────────────────────────────────
   { url: 'https://feeds.bbci.co.uk/news/world/rss.xml',                         source: 'BBC World' },
+  { url: 'https://rss.ap.org/article/world-news',                                source: 'AP' },
   { url: 'https://api.axios.com/feed/',                                          source: 'Axios' },
+  // ── Financial / markets ────────────────────────────────────────────────────
   { url: 'https://feeds.a.wsj.com/wsj/xml/rss/3_7085.xml',                      source: 'WSJ Markets' },
   { url: 'https://feeds.a.wsj.com/wsj/xml/rss/3_7011.xml',                      source: 'WSJ World' },
   { url: 'https://www.ft.com/rss/home',                                          source: 'FT' },
   { url: 'https://feeds.bloomberg.com/markets/news.rss',                         source: 'Bloomberg' },
   { url: 'https://feeds.bloomberg.com/politics/news.rss',                        source: 'Bloomberg' },
-  { url: 'https://www.haaretz.com/arc/outboundfeeds/rss/?outputType=xml',        source: 'Haaretz' },
-  { url: 'https://rss.ap.org/article/world-news',                                source: 'AP' },
+  // ── Google News targeted searches — catches paywalled articles ─────────────
+  // Google indexes WSJ, FT, Bloomberg, NYT etc. and surfaces them via RSS
+  { url: 'https://news.google.com/rss/search?q=iran+israel+war+military&hl=en-US&gl=US&ceid=US:en',          source: 'Google News' },
+  { url: 'https://news.google.com/rss/search?q=iran+oil+crude+sanctions+hormuz&hl=en-US&gl=US&ceid=US:en',   source: 'Google News' },
+  { url: 'https://news.google.com/rss/search?q=houthi+red+sea+shipping+tanker&hl=en-US&gl=US&ceid=US:en',    source: 'Google News' },
+  { url: 'https://news.google.com/rss/search?q=iran+gulf+states+nuclear+strikes&hl=en-US&gl=US&ceid=US:en',  source: 'Google News' },
 ];
 
 // ── Relevance scoring ─────────────────────────────────────────────────────────
 // A story is relevant if it scores above the threshold.
 // This replaces the flat keyword list with weighted categories.
 
-// Direct conflict participants & events — any one = highly relevant
+// Direct conflict participants & events — any one = highly relevant (10 pts)
 const DIRECT_CONFLICT = [
-  'iran', 'iranian', 'irgc', 'khamenei', 'tehran',
-  'idf', 'netanyahu', 'israel strikes', 'israeli air', 'israeli military',
-  'hezbollah', 'nasrallah',
-  'houthi', 'houthis', 'ansar allah',
-  'strait of hormuz', 'hormuz',
-  'natanz', 'fordow', 'uranium enrichment', 'nuclear deal', 'jcpoa',
-  'us strikes iran', 'iran sanctions', 'iran nuclear',
-  'centcom', 'us military iran', 'us military israel',
-  'iron dome', 'david\'s sling', 'arrow missile',
-  'ballistic missile iran', 'cruise missile iran',
-  'persian gulf blockade',
+  // Iran actors & places
+  'iran', 'iranian', 'irgc', 'khamenei', 'pezeshkian', 'tehran', 'isfahan',
+  'natanz', 'fordow', 'arak', 'bushehr',
+  // Nuclear
+  'uranium enrichment', 'nuclear deal', 'jcpoa', 'iran nuclear', 'breakout',
+  'highly enriched uranium', 'centrifuge',
+  // Iran military
+  'iran sanctions', 'iran strikes', 'iran attack', 'iran offensive',
+  'us strikes iran', 'israel strikes iran', 'iran retaliation',
+  'centcom', 'fifth fleet',
+  // Israel
+  'idf', 'netanyahu', 'gallant', 'israel strikes', 'israeli air',
+  'israeli military', 'mossad',
+  // Proxies
+  'hezbollah', 'nasrallah', 'houthi', 'houthis', 'ansar allah',
+  'islamic revolutionary', 'quds force',
+  // Key chokepoints
+  'strait of hormuz', 'hormuz', 'bab el-mandeb',
+  // Missile systems
+  'iron dome', "david's sling", 'arrow missile',
+  'ballistic missile', 'cruise missile attack', 'hypersonic missile',
+  // Gulf states in conflict context
+  'gulf states offense', 'gulf states defense', 'gcc military',
+  'persian gulf blockade', 'gulf cooperation council military',
 ];
 
-// Market & economic impact — relevant when they appear alongside conflict context
+// Market & economic impact — moderate signal (5 pts)
 const MARKET_IMPACT = [
+  // Oil & energy
   'oil price', 'crude price', 'crude oil', 'brent crude', 'wti crude',
-  'energy price', 'energy market', 'energy supply',
-  'oil supply', 'oil output', 'opec',
-  'natural gas price', 'gas supply disruption',
-  'gold price', 'gold rally', 'safe haven',
-  'defense stock', 'defense spending', 'arms contract', 'weapons contract',
+  'energy price', 'energy market', 'energy supply', 'energy crisis',
+  'oil supply', 'oil output', 'oil disruption', 'opec', 'opec+',
+  'natural gas price', 'gas supply', 'lng price', 'gas disruption',
+  // Metals & commodities
+  'gold price', 'gold rally', 'gold surge', 'safe haven',
+  'copper price', 'commodity price', 'commodity market',
+  // Defense
+  'defense stock', 'defense spending', 'defense contract',
+  'arms deal', 'arms contract', 'weapons contract', 'military spending',
+  'lockheed', 'raytheon', 'northrop', 'general dynamics', 'bae systems',
+  // Shipping & trade
   'shipping disruption', 'red sea shipping', 'suez canal',
-  'tanker attack', 'cargo ship', 'freight rate',
-  'war risk premium', 'geopolitical risk', 'risk premium',
-  'inflation oil', 'supply shock',
-  'lockheed', 'raytheon', 'northrop', 'general dynamics',
+  'tanker attack', 'cargo ship seized', 'freight rate', 'shipping rate',
+  'war risk insurance', 'war risk premium',
+  // Financial
+  'geopolitical risk', 'risk premium', 'risk-off', 'flight to safety',
+  'supply shock', 'inflation oil', 'stagflation',
+  'oil futures', 'energy futures',
 ];
 
-// Conflict context — geographic/political signals
+// Conflict context — geographic/political background (2 pts)
 const CONFLICT_CONTEXT = [
-  'middle east', 'persian gulf', 'red sea', 'gulf of aden',
-  'gaza', 'west bank', 'golan', 'lebanon', 'syria', 'iraq', 'yemen',
-  'pentagon', 'white house iran', 'state department iran',
-  'missile strike', 'air strike', 'drone attack', 'rocket attack',
-  'ceasefire', 'escalation', 'retaliation', 'war',
+  // Geography
+  'middle east', 'persian gulf', 'arabian gulf', 'gulf states',
+  'red sea', 'gulf of aden', 'gulf of oman',
+  'gaza', 'west bank', 'golan heights', 'lebanon', 'syria',
+  'iraq', 'yemen', 'saudi arabia', 'uae', 'bahrain',
+  // US government
+  'pentagon', 'white house', 'state department', 'national security council',
+  'us military', 'us navy', 'us air force', 'us central command',
+  // Military events
+  'missile strike', 'air strike', 'airstrike', 'drone attack', 'drone strike',
+  'rocket attack', 'precision strike', 'targeted strike',
+  // Political
+  'ceasefire', 'escalation', 'de-escalation', 'retaliation', 'war',
   'military operation', 'ground offensive', 'naval blockade',
-  'sanctions', 'embargo', 'oil embargo',
-  'proxy war', 'axis of resistance',
-  'iaea', 'nuclear inspectors',
-  'hamas', 'islamic jihad', 'hezbollah attack',
+  'sanctions', 'embargo', 'oil embargo', 'export ban',
+  'proxy war', 'axis of resistance', 'resistance front',
+  // Nuclear monitoring
+  'iaea', 'nuclear inspectors', 'safeguards',
+  // Non-state actors
+  'hamas', 'islamic jihad', 'hezbollah attack', 'militia attack',
+  // Offense/defense framing
+  'offensive', 'preemptive strike', 'retaliatory strike', 'counter-strike',
 ];
 
-// Noise exclusions — topics that share keywords but are irrelevant
+// Noise exclusions — irrelevant articles that share keywords
 const EXCLUSIONS = [
   'movie', 'film', 'actor', 'actress', 'celebrity', 'oscar',
-  'sports', 'nfl', 'nba', 'soccer', 'football',
-  'recipe', 'fashion', 'lifestyle',
-  'iran deal 2015',   // old JCPOA history pieces, not current
+  'nfl', 'nba', 'mlb', 'premier league', 'world cup',
+  'recipe', 'fashion', 'lifestyle', 'travel guide',
+  'iran deal 2015',        // stale JCPOA history
+  'iran nuclear agreement 2015',
+  'iranian cinema', 'iranian film', 'iranian tv',
 ];
 
 function scoreRelevance(title: string, summary?: string): number {
