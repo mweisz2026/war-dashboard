@@ -1,6 +1,6 @@
 /**
- * Yahoo Finance data fetching via the public v7/v8 APIs (no API key needed).
- * We use the HTTP API directly to avoid yahoo-finance2 TypeScript issues.
+ * Yahoo Finance data fetching via the public v8 API.
+ * Fallback chain: query1 → query2 → Finnhub (if FINNHUB_API_KEY is set)
  */
 import type { Quote, HistoricalPoint } from './types';
 import { YAHOO_TICKERS } from './tickers';
@@ -13,12 +13,80 @@ const HEADERS = {
   'Referer': 'https://finance.yahoo.com/',
 };
 
-// ── Current quotes via v8 chart API (one request per symbol, more reliable) ──
+// ── Types ────────────────────────────────────────────────────────────────────
 
-async function fetchSingleQuote(symbol: string): Promise<{ price: number; change: number; changePercent: number } | null> {
-  const url =
-    `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}` +
-    `?interval=1d&range=1d`;
+interface YahooChartResponse {
+  chart: {
+    result?: Array<{
+      meta: {
+        regularMarketPrice?: number;
+        previousClose?: number;
+        chartPreviousClose?: number;
+        currency?: string;
+      };
+      timestamp: number[];
+      indicators: {
+        quote: Array<{
+          close: (number | null)[];
+          volume: (number | null)[];
+        }>;
+      };
+    }>;
+    error?: { code: string; description: string };
+  };
+}
+
+interface PriceData {
+  price: number;
+  change: number;
+  changePercent: number;
+}
+
+// ── Finnhub symbol map ───────────────────────────────────────────────────────
+// Yahoo symbols that need translation for Finnhub
+
+const FINNHUB_MAP: Record<string, string> = {
+  'CL=F':      'CL1!',   // WTI Crude futures
+  'BZ=F':      'BZ1!',   // Brent futures
+  'NG=F':      'NG1!',   // Natural Gas futures
+  'HO=F':      'HO1!',   // Heating Oil futures
+  'GC=F':      'GC1!',   // Gold futures
+  'SI=F':      'SI1!',   // Silver futures
+  '^GSPC':     'SPY',    // S&P 500 → SPY ETF proxy
+  '^IXIC':     'QQQ',    // NASDAQ → QQQ proxy
+  '^DJI':      'DIA',    // Dow → DIA proxy
+  '^VIX':      'VIX',
+  '^OVX':      'OVX',
+  'ILS=X':     'FOREX:USDILS',
+  'EURUSD=X':  'FOREX:EURUSD',
+  'CADUSD=X':  'FOREX:USDCAD',
+  'DX-Y.NYB':  'FOREX:USDIDX',
+  '^TA125.TA': 'EIS',    // Tel Aviv 125 → EIS ETF proxy
+};
+
+async function fetchFinnhub(yahooSymbol: string): Promise<PriceData | null> {
+  const apiKey = process.env.FINNHUB_API_KEY;
+  if (!apiKey) return null;
+
+  const symbol = FINNHUB_MAP[yahooSymbol] ?? yahooSymbol;
+  try {
+    const res = await fetch(
+      `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(symbol)}&token=${apiKey}`,
+      { headers: { 'Accept': 'application/json' } }
+    );
+    if (!res.ok) return null;
+    const d: { c: number; d: number; dp: number; pc: number } = await res.json();
+    if (!d.c || d.c === 0) return null;
+    return { price: d.c, change: d.d ?? 0, changePercent: d.dp ?? 0 };
+  } catch {
+    return null;
+  }
+}
+
+// ── Core quote fetch with fallback chain ─────────────────────────────────────
+
+async function fetchFromYahoo(symbol: string, host: string): Promise<PriceData | null> {
+  const url = `https://${host}/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=1d`;
   try {
     const res = await fetch(url, { headers: HEADERS });
     if (!res.ok) return null;
@@ -33,6 +101,19 @@ async function fetchSingleQuote(symbol: string): Promise<{ price: number; change
   } catch {
     return null;
   }
+}
+
+async function fetchSingleQuote(symbol: string): Promise<PriceData | null> {
+  // 1. Try query1 (primary)
+  const q1 = await fetchFromYahoo(symbol, 'query1.finance.yahoo.com');
+  if (q1) return q1;
+
+  // 2. Try query2 (secondary — different server, often succeeds when query1 is rate-limited)
+  const q2 = await fetchFromYahoo(symbol, 'query2.finance.yahoo.com');
+  if (q2) return q2;
+
+  // 3. Try Finnhub as final fallback
+  return fetchFinnhub(symbol);
 }
 
 export async function fetchAllQuotes(): Promise<Quote[]> {
@@ -69,7 +150,7 @@ export async function fetchAllQuotes(): Promise<Quote[]> {
   });
 }
 
-// ── Historical data via v8 chart endpoint ────────────────────────────────────
+// ── Historical data ───────────────────────────────────────────────────────────
 
 type Period = '1mo' | '3mo' | '6mo' | '1y' | '2y' | 'custom';
 
@@ -86,27 +167,6 @@ function getPeriodStart(period: Period, customStart?: string): Date {
   return d;
 }
 
-interface YahooChartResponse {
-  chart: {
-    result?: Array<{
-      meta: {
-        regularMarketPrice?: number;
-        previousClose?: number;
-        chartPreviousClose?: number;
-        currency?: string;
-      };
-      timestamp: number[];
-      indicators: {
-        quote: Array<{
-          close: (number | null)[];
-          volume: (number | null)[];
-        }>;
-      };
-    }>;
-    error?: { code: string; description: string };
-  };
-}
-
 export async function fetchHistory(
   symbol: string,
   period: Period = '3mo',
@@ -117,11 +177,13 @@ export async function fetchHistory(
   const period1 = Math.floor(start.getTime() / 1000);
   const period2 = Math.floor(end.getTime() / 1000);
 
-  const url =
-    `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}` +
-    `?interval=1d&period1=${period1}&period2=${period2}`;
+  const path = `/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&period1=${period1}&period2=${period2}`;
 
-  const res = await fetch(url, { headers: HEADERS });
+  // Try query1, then query2
+  let res = await fetch(`https://query1.finance.yahoo.com${path}`, { headers: HEADERS });
+  if (!res.ok) {
+    res = await fetch(`https://query2.finance.yahoo.com${path}`, { headers: HEADERS });
+  }
   if (!res.ok) throw new Error(`Yahoo chart API ${symbol}: ${res.status}`);
 
   const data: YahooChartResponse = await res.json();
