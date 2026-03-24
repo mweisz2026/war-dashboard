@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import {
-  ResponsiveContainer, LineChart, Line, XAxis, YAxis,
+  ResponsiveContainer, AreaChart, Area, XAxis, YAxis,
   Tooltip, CartesianGrid, ReferenceLine,
 } from 'recharts';
 import { format, parseISO } from 'date-fns';
@@ -71,12 +71,17 @@ export default function PriceChart({ quote, onClose }: Props) {
   }, [quote.symbol, period]);
 
   const isUp = (quote.changePercent ?? 0) >= 0;
-  const lineColor = isUp ? '#3fb950' : '#f85149';
+  const lineColor  = isUp ? '#3fb950' : '#f85149';
+  const fillColor  = isUp ? '#3fb950' : '#f85149';
 
   // Baseline price (first data point) for % change from baseline
   const baseline = data[0]?.close ?? null;
   const latest = data[data.length - 1]?.close ?? null;
   const totalChange = baseline && latest ? ((latest - baseline) / baseline) * 100 : null;
+
+  // Period high/low from data
+  const periodHigh = data.length ? Math.max(...data.map(d => d.close)) : null;
+  const periodLow  = data.length ? Math.min(...data.map(d => d.close)) : null;
 
   // Conflict date reference lines that fall within the data range
   const refLines = data.length
@@ -96,15 +101,12 @@ export default function PriceChart({ quote, onClose }: Props) {
               <h2 className="text-lg font-mono font-bold text-text">{quote.name}</h2>
               <span className="text-xs text-muted font-mono bg-bg px-2 py-0.5 rounded">{quote.symbol}</span>
             </div>
-            <div className="flex items-center gap-3 mt-1">
-              <span className="text-2xl font-mono font-semibold text-text">
+            <div className="flex items-center gap-3 mt-1 flex-wrap">
+              <span className="text-2xl font-mono font-semibold text-text tabular-nums">
                 {quote.price.toLocaleString('en-US', { maximumFractionDigits: 3 })}
                 {quote.unit && <span className="text-sm text-muted ml-1">{quote.unit}</span>}
               </span>
-              <span className={clsx(
-                'text-sm font-mono font-semibold',
-                isUp ? 'text-up' : 'text-down'
-              )}>
+              <span className={clsx('text-sm font-mono font-semibold', isUp ? 'text-up' : 'text-down')}>
                 {isUp ? '▲' : '▼'} {Math.abs(quote.changePercent).toFixed(2)}% today
               </span>
               {totalChange !== null && (
@@ -114,6 +116,18 @@ export default function PriceChart({ quote, onClose }: Props) {
                 )}>
                   {totalChange >= 0 ? '+' : ''}{totalChange.toFixed(1)}% this period
                 </span>
+              )}
+            </div>
+            {/* Stats row */}
+            <div className="flex gap-4 mt-2 text-[10px] font-mono text-muted">
+              {quote.dayLow != null && quote.dayHigh != null && (
+                <span>Day <span className="text-text/70">{quote.dayLow.toLocaleString('en-US', { maximumFractionDigits: 2 })} – {quote.dayHigh.toLocaleString('en-US', { maximumFractionDigits: 2 })}</span></span>
+              )}
+              {quote.weekLow52 != null && quote.weekHigh52 != null && (
+                <span>52W <span className="text-text/70">{quote.weekLow52.toLocaleString('en-US', { maximumFractionDigits: 2 })} – {quote.weekHigh52.toLocaleString('en-US', { maximumFractionDigits: 2 })}</span></span>
+              )}
+              {periodHigh != null && periodLow != null && (
+                <span>Period H/L <span className="text-text/70">{periodHigh.toLocaleString('en-US', { maximumFractionDigits: 2 })} / {periodLow.toLocaleString('en-US', { maximumFractionDigits: 2 })}</span></span>
               )}
             </div>
           </div>
@@ -141,7 +155,7 @@ export default function PriceChart({ quote, onClose }: Props) {
         </div>
 
         {/* Chart */}
-        <div className="h-64">
+        <div className="h-72">
           {loading && (
             <div className="h-full flex items-center justify-center text-muted text-sm font-mono">
               Loading...
@@ -154,8 +168,14 @@ export default function PriceChart({ quote, onClose }: Props) {
           )}
           {!loading && !error && data.length > 0 && (
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={data} margin={{ top: 5, right: 10, bottom: 5, left: 10 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#30363d" />
+              <AreaChart data={data} margin={{ top: 5, right: 10, bottom: 5, left: 10 }}>
+                <defs>
+                  <linearGradient id="priceGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%"  stopColor={fillColor} stopOpacity={0.25} />
+                    <stop offset="95%" stopColor={fillColor} stopOpacity={0.02} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#30363d" opacity={0.5} />
                 <XAxis
                   dataKey="date"
                   tick={{ fill: '#8b949e', fontSize: 10, fontFamily: 'monospace' }}
@@ -163,12 +183,16 @@ export default function PriceChart({ quote, onClose }: Props) {
                     try { return format(parseISO(v), 'MMM d'); } catch { return v; }
                   }}
                   interval="preserveStartEnd"
+                  axisLine={false}
+                  tickLine={false}
                 />
                 <YAxis
                   tick={{ fill: '#8b949e', fontSize: 10, fontFamily: 'monospace' }}
                   domain={['auto', 'auto']}
-                  width={55}
+                  width={60}
                   tickFormatter={(v) => v.toLocaleString('en-US', { maximumFractionDigits: 1 })}
+                  axisLine={false}
+                  tickLine={false}
                 />
                 <Tooltip content={<CustomTooltip />} />
                 {refLines.map((rl) => (
@@ -177,6 +201,7 @@ export default function PriceChart({ quote, onClose }: Props) {
                     x={rl.date}
                     stroke="#d29922"
                     strokeDasharray="4 3"
+                    strokeOpacity={0.8}
                     label={{
                       value: rl.label,
                       position: 'insideTopLeft',
@@ -186,14 +211,16 @@ export default function PriceChart({ quote, onClose }: Props) {
                     }}
                   />
                 ))}
-                <Line
+                <Area
                   type="monotone"
                   dataKey="close"
                   stroke={lineColor}
-                  dot={false}
                   strokeWidth={1.5}
+                  fill="url(#priceGrad)"
+                  dot={false}
+                  activeDot={{ r: 3, fill: lineColor, strokeWidth: 0 }}
                 />
-              </LineChart>
+              </AreaChart>
             </ResponsiveContainer>
           )}
         </div>
