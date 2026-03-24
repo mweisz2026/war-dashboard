@@ -1,46 +1,81 @@
 'use client';
 
 import { useState, useCallback, useRef } from 'react';
-import { RefreshCw, AlertCircle } from 'lucide-react';
+import { RefreshCw, AlertCircle, ChevronDown, ChevronRight } from 'lucide-react';
 import clsx from 'clsx';
 import type { Quote, NewsItem, MarketSnapshot } from '@/lib/types';
-import { CATEGORIES } from '@/lib/tickers';
-import MarketSection from './MarketSection';
+import { COMMODITY_CATEGORIES } from '@/lib/tickers';
+import CommodityCard from './CommodityCard';
 import PriceChart from './PriceChart';
 import NewsFeed from './NewsFeed';
 
-// Key metrics shown in the top banner
-const BANNER_SYMBOLS = ['CL=F', 'GC=F', '^VIX', 'ILS=X', '^GSPC', 'BAMLH0A0HYM2'];
+// Top banner: key war-sensitive signals
+const BANNER_SYMBOLS = ['CL=F', 'BZ=F', 'GC=F', '^VIX', '^OVX', 'ILS=X', 'NG=F', 'HG=F'];
 
 interface Props {
   initialSnapshot: MarketSnapshot;
   initialNews: NewsItem[];
 }
 
-function fmt(price: number, unit?: string) {
-  if (price === 0) return '—';
-  if (price >= 1000) return price.toLocaleString('en-US', { maximumFractionDigits: 0 });
+function fmt(price: number) {
+  if (!price) return '—';
+  if (price >= 1000) return price.toLocaleString('en-US', { maximumFractionDigits: 1 });
   return price.toLocaleString('en-US', { maximumFractionDigits: 2 });
 }
 
-function BannerCard({ quote }: { quote: Quote }) {
+function BannerTicker({ quote }: { quote: Quote }) {
   const isUp = quote.changePercent > 0;
   const isDown = quote.changePercent < 0;
   return (
-    <div className="flex flex-col items-center px-4 py-2 border-r border-border last:border-0 min-w-[110px]">
-      <span className="text-[10px] text-muted font-mono uppercase tracking-wider">{quote.name}</span>
-      <span className="text-base font-mono font-bold text-text mt-0.5">
-        {fmt(quote.price, quote.unit)}
-        {quote.unit && <span className="text-[9px] text-muted ml-0.5">{quote.unit}</span>}
-      </span>
-      <span className={clsx(
-        'text-[11px] font-mono',
-        isUp ? 'text-up' : isDown ? 'text-down' : 'text-muted'
-      )}>
-        {isUp ? '▲' : isDown ? '▼' : '—'}
-        {Math.abs(quote.changePercent).toFixed(2)}%
+    <div className="flex flex-col items-center px-3 py-2 border-r border-border/50 last:border-0 min-w-[95px]">
+      <span className="text-[9px] text-muted font-mono uppercase tracking-wider truncate w-full text-center">{quote.name}</span>
+      <span className="text-sm font-mono font-bold text-text mt-0.5">{fmt(quote.price)}</span>
+      <span className={clsx('text-[10px] font-mono', isUp ? 'text-up' : isDown ? 'text-down' : 'text-muted')}>
+        {isUp ? '▲' : isDown ? '▼' : '—'}{Math.abs(quote.changePercent).toFixed(2)}%
       </span>
     </div>
+  );
+}
+
+function CategorySection({
+  label, description, quotes, onTickerClick, selectedSymbol,
+}: {
+  label: string; description: string; quotes: Quote[];
+  onTickerClick: (q: Quote) => void; selectedSymbol?: string;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+  if (quotes.length === 0) return null;
+
+  return (
+    <section className="mb-6">
+      <button
+        onClick={() => setCollapsed(c => !c)}
+        className="w-full flex items-center gap-2 mb-3 group"
+      >
+        <span className="text-muted/70 group-hover:text-text transition-colors">
+          {collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+        </span>
+        <h2 className="text-xs font-bold text-text uppercase tracking-widest">{label}</h2>
+        <span className="text-[10px] text-muted/50 font-mono hidden sm:block normal-case tracking-normal">
+          — {description}
+        </span>
+        <div className="flex-1 border-t border-border/30 ml-1" />
+        <span className="text-[9px] text-muted/40 font-mono">{quotes.length}</span>
+      </button>
+
+      {!collapsed && (
+        <div className="grid gap-2 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+          {quotes.map(q => (
+            <CommodityCard
+              key={q.symbol}
+              quote={q}
+              onClick={onTickerClick}
+              isSelected={selectedSymbol === q.symbol}
+            />
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -58,14 +93,14 @@ export default function Dashboard({ initialSnapshot, initialNews }: Props) {
     setIsPending(true);
     setRefreshError(false);
     try {
-      const [marketRes, newsRes] = await Promise.all([
+      const [mRes, nRes] = await Promise.all([
         fetch('/api/market', { signal: abortRef.current.signal }),
         fetch('/api/news',   { signal: abortRef.current.signal }),
       ]);
-      if (!marketRes.ok || !newsRes.ok) throw new Error('Fetch failed');
-      const [marketData, newsData] = await Promise.all([marketRes.json(), newsRes.json()]);
-      setSnapshot(marketData);
-      setNews(newsData.news ?? []);
+      if (!mRes.ok || !nRes.ok) throw new Error('Fetch failed');
+      const [mData, nData] = await Promise.all([mRes.json(), nRes.json()]);
+      setSnapshot(mData);
+      setNews(nData.news ?? []);
     } catch (e: unknown) {
       if (e instanceof Error && e.name !== 'AbortError') setRefreshError(true);
     } finally {
@@ -74,93 +109,77 @@ export default function Dashboard({ initialSnapshot, initialNews }: Props) {
   }, []);
 
   const bannerQuotes = BANNER_SYMBOLS
-    .map((s) => snapshot.quotes.find((q) => q.symbol === s))
+    .map(s => snapshot.quotes.find(q => q.symbol === s))
     .filter(Boolean) as Quote[];
 
   return (
     <div className="min-h-screen bg-bg text-text">
-      {/* ── Top bar ─────────────────────────────────────────────── */}
-      <header className="border-b border-border bg-surface/50 backdrop-blur sticky top-0 z-40">
-        <div className="max-w-[1600px] mx-auto px-4 py-3">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <div>
-              <h1 className="text-lg font-bold font-mono text-text tracking-tight">
-                🌐 War Impact Tracker
-              </h1>
-              <p className="text-[11px] text-muted font-mono">
-                Iran · Israel · US — Real-time market & macro impact dashboard
-              </p>
-            </div>
-            <div className="flex items-center gap-3">
-              {refreshError && (
-                <span className="flex items-center gap-1 text-xs text-down font-mono">
-                  <AlertCircle size={12} /> Refresh failed
-                </span>
-              )}
-              <span className="text-[10px] text-muted font-mono hidden sm:block">
-                Updated {new Date(snapshot.timestamp).toLocaleString('en-US', {
-                  month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-                })}
+      {/* ── Header ─────────────────────────────────────────────────────────── */}
+      <header className="border-b border-border bg-surface/60 backdrop-blur sticky top-0 z-40">
+        <div className="max-w-[1800px] mx-auto px-4 py-2.5 flex items-center justify-between flex-wrap gap-2">
+          <div>
+            <h1 className="text-base font-bold font-mono text-text tracking-tight">
+              ⚔️ War Impact Commodity Tracker
+            </h1>
+            <p className="text-[10px] text-muted font-mono">Iran · Israel · US — Live commodity & market impact</p>
+          </div>
+          <div className="flex items-center gap-3">
+            {refreshError && (
+              <span className="flex items-center gap-1 text-[10px] text-down font-mono">
+                <AlertCircle size={10} /> Refresh failed
               </span>
-              <button
-                onClick={refresh}
-                disabled={isPending}
-                className={clsx(
-                  'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono',
-                  'border border-border hover:border-accent/60 hover:text-accent transition-all',
-                  'disabled:opacity-50 disabled:cursor-not-allowed'
-                )}
-              >
-                <RefreshCw size={12} className={clsx(isPending && 'animate-spin')} />
-                Refresh
-              </button>
+            )}
+            <span className="text-[10px] text-muted font-mono hidden sm:block">
+              {new Date(snapshot.timestamp).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+            </span>
+            <button
+              onClick={refresh}
+              disabled={isPending}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-mono border border-border hover:border-accent/60 hover:text-accent transition-all disabled:opacity-50"
+            >
+              <RefreshCw size={11} className={clsx(isPending && 'animate-spin')} />
+              Refresh
+            </button>
+          </div>
+        </div>
+
+        {/* Key signals banner */}
+        <div className="border-t border-border/50 bg-bg/50">
+          <div className="max-w-[1800px] mx-auto px-2">
+            <div className="flex overflow-x-auto">
+              {bannerQuotes.map(q => <BannerTicker key={q.symbol} quote={q} />)}
             </div>
           </div>
         </div>
       </header>
 
-      {/* ── Key metrics banner ──────────────────────────────────── */}
-      <div className="border-b border-border bg-bg/80">
-        <div className="max-w-[1600px] mx-auto px-4">
-          <div className="flex overflow-x-auto">
-            {bannerQuotes.map((q) => <BannerCard key={q.symbol} quote={q} />)}
-          </div>
-        </div>
-      </div>
-
-      {/* ── Main content ────────────────────────────────────────── */}
-      <div className="max-w-[1600px] mx-auto px-4 py-6">
-        <div className="flex flex-col lg:flex-row gap-6">
-          {/* Market sections */}
+      {/* ── Main ───────────────────────────────────────────────────────────── */}
+      <div className="max-w-[1800px] mx-auto px-4 py-5">
+        <div className="flex gap-5">
+          {/* Commodities — main content */}
           <main className="flex-1 min-w-0">
-            {CATEGORIES.map(({ key, label, description }) => {
-              const quotes = snapshot.quotes.filter((q) => q.category === key);
-              return (
-                <MarketSection
-                  key={key}
-                  label={label}
-                  description={description}
-                  quotes={quotes}
-                  onTickerClick={setSelectedQuote}
-                  selectedSymbol={selectedQuote?.symbol}
-                />
-              );
-            })}
+            {COMMODITY_CATEGORIES.map(({ key, label, description }) => (
+              <CategorySection
+                key={key}
+                label={label}
+                description={description}
+                quotes={snapshot.quotes.filter(q => q.category === key)}
+                onTickerClick={setSelectedQuote}
+                selectedSymbol={selectedQuote?.symbol}
+              />
+            ))}
           </main>
 
-          {/* News sidebar */}
-          <aside className="lg:w-80 xl:w-96 lg:sticky lg:top-[112px] lg:h-[calc(100vh-120px)]">
+          {/* News sidebar — narrower */}
+          <aside className="w-60 xl:w-64 flex-shrink-0 lg:sticky lg:top-[96px] lg:h-[calc(100vh-104px)]">
             <NewsFeed items={news} lastUpdated={snapshot.timestamp} />
           </aside>
         </div>
       </div>
 
-      {/* ── Chart modal ─────────────────────────────────────────── */}
+      {/* Chart modal */}
       {selectedQuote && (
-        <PriceChart
-          quote={selectedQuote}
-          onClose={() => setSelectedQuote(null)}
-        />
+        <PriceChart quote={selectedQuote} onClose={() => setSelectedQuote(null)} />
       )}
     </div>
   );

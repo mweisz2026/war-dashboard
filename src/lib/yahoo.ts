@@ -1,7 +1,3 @@
-/**
- * Yahoo Finance data fetching via the public v8 API.
- * Fallback chain: query1 → query2 → Finnhub (if FINNHUB_API_KEY is set)
- */
 import type { Quote, HistoricalPoint } from './types';
 import { YAHOO_TICKERS } from './tickers';
 
@@ -13,8 +9,6 @@ const HEADERS = {
   'Referer': 'https://finance.yahoo.com/',
 };
 
-// ── Types ────────────────────────────────────────────────────────────────────
-
 interface YahooChartResponse {
   chart: {
     result?: Array<{
@@ -22,6 +16,10 @@ interface YahooChartResponse {
         regularMarketPrice?: number;
         previousClose?: number;
         chartPreviousClose?: number;
+        regularMarketDayHigh?: number;
+        regularMarketDayLow?: number;
+        fiftyTwoWeekHigh?: number;
+        fiftyTwoWeekLow?: number;
         currency?: string;
       };
       timestamp: number[];
@@ -40,50 +38,38 @@ interface PriceData {
   price: number;
   change: number;
   changePercent: number;
+  dayHigh?: number;
+  dayLow?: number;
+  weekHigh52?: number;
+  weekLow52?: number;
 }
 
-// ── Finnhub symbol map ───────────────────────────────────────────────────────
-// Yahoo symbols that need translation for Finnhub
+// ── Finnhub symbol map ────────────────────────────────────────────────────────
 
 const FINNHUB_MAP: Record<string, string> = {
-  'CL=F':      'CL1!',   // WTI Crude futures
-  'BZ=F':      'BZ1!',   // Brent futures
-  'NG=F':      'NG1!',   // Natural Gas futures
-  'HO=F':      'HO1!',   // Heating Oil futures
-  'GC=F':      'GC1!',   // Gold futures
-  'SI=F':      'SI1!',   // Silver futures
-  '^GSPC':     'SPY',    // S&P 500 → SPY ETF proxy
-  '^IXIC':     'QQQ',    // NASDAQ → QQQ proxy
-  '^DJI':      'DIA',    // Dow → DIA proxy
-  '^VIX':      'VIX',
-  '^OVX':      'OVX',
-  'ILS=X':     'FOREX:USDILS',
-  'EURUSD=X':  'FOREX:EURUSD',
-  'CADUSD=X':  'FOREX:USDCAD',
-  'DX-Y.NYB':  'FOREX:USDIDX',
-  '^TA125.TA': 'EIS',    // Tel Aviv 125 → EIS ETF proxy
+  'CL=F': 'CL1!', 'BZ=F': 'BZ1!', 'NG=F': 'NG1!', 'HO=F': 'HO1!',
+  'RB=F': 'RB1!', 'GC=F': 'GC1!', 'SI=F': 'SI1!', 'PA=F': 'PA1!',
+  'PL=F': 'PL1!', 'HG=F': 'HG1!', 'ZC=F': 'ZC1!', 'ZS=F': 'ZS1!',
+  'ZW=F': 'ZW1!', 'KE=F': 'KE1!', 'KC=F': 'KC1!', 'SB=F': 'SB1!',
+  'CT=F': 'CT1!', 'CC=F': 'CC1!', 'LE=F': 'LE1!', 'HE=F': 'HE1!',
+  '^VIX': 'VIX', 'ILS=X': 'FOREX:USDILS', 'DX-Y.NYB': 'USDIDX',
 };
 
 async function fetchFinnhub(yahooSymbol: string): Promise<PriceData | null> {
   const apiKey = process.env.FINNHUB_API_KEY;
   if (!apiKey) return null;
-
   const symbol = FINNHUB_MAP[yahooSymbol] ?? yahooSymbol;
   try {
     const res = await fetch(
       `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(symbol)}&token=${apiKey}`,
-      { headers: { 'Accept': 'application/json' } }
+      { headers: { Accept: 'application/json' } }
     );
     if (!res.ok) return null;
-    const d: { c: number; d: number; dp: number; pc: number } = await res.json();
+    const d: { c: number; d: number; dp: number; h: number; l: number } = await res.json();
     if (!d.c || d.c === 0) return null;
-    return { price: d.c, change: d.d ?? 0, changePercent: d.dp ?? 0 };
-  } catch {
-    return null;
-  }
+    return { price: d.c, change: d.d ?? 0, changePercent: d.dp ?? 0, dayHigh: d.h, dayLow: d.l };
+  } catch { return null; }
 }
-
-// ── Core quote fetch with fallback chain ─────────────────────────────────────
 
 async function fetchFromYahoo(symbol: string, host: string): Promise<PriceData | null> {
   const url = `https://${host}/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=1d`;
@@ -97,22 +83,23 @@ async function fetchFromYahoo(symbol: string, host: string): Promise<PriceData |
     const prevClose = meta.previousClose ?? meta.chartPreviousClose ?? price;
     const change = price - prevClose;
     const changePercent = prevClose !== 0 ? (change / prevClose) * 100 : 0;
-    return { price, change, changePercent };
-  } catch {
-    return null;
-  }
+    return {
+      price,
+      change,
+      changePercent,
+      dayHigh: meta.regularMarketDayHigh,
+      dayLow: meta.regularMarketDayLow,
+      weekHigh52: meta.fiftyTwoWeekHigh,
+      weekLow52: meta.fiftyTwoWeekLow,
+    };
+  } catch { return null; }
 }
 
 async function fetchSingleQuote(symbol: string): Promise<PriceData | null> {
-  // 1. Try query1 (primary)
   const q1 = await fetchFromYahoo(symbol, 'query1.finance.yahoo.com');
   if (q1) return q1;
-
-  // 2. Try query2 (secondary — different server, often succeeds when query1 is rate-limited)
   const q2 = await fetchFromYahoo(symbol, 'query2.finance.yahoo.com');
   if (q2) return q2;
-
-  // 3. Try Finnhub as final fallback
   return fetchFinnhub(symbol);
 }
 
@@ -126,26 +113,16 @@ export async function fetchAllQuotes(): Promise<Quote[]> {
     const data = r.status === 'fulfilled' ? r.value : null;
     if (!data) {
       return {
-        symbol: ticker.symbol,
-        name: ticker.name,
-        category: ticker.category,
-        price: 0,
-        change: 0,
-        changePercent: 0,
-        unit: ticker.unit,
-        source: 'yahoo',
-        error: 'No data',
+        symbol: ticker.symbol, name: ticker.name, category: ticker.category,
+        price: 0, change: 0, changePercent: 0, unit: ticker.unit, source: 'yahoo', error: 'No data',
       };
     }
     return {
-      symbol: ticker.symbol,
-      name: ticker.name,
-      category: ticker.category,
-      price: data.price,
-      change: data.change,
-      changePercent: data.changePercent,
-      unit: ticker.unit,
-      source: 'yahoo',
+      symbol: ticker.symbol, name: ticker.name, category: ticker.category,
+      price: data.price, change: data.change, changePercent: data.changePercent,
+      unit: ticker.unit, source: 'yahoo',
+      dayHigh: data.dayHigh, dayLow: data.dayLow,
+      weekHigh52: data.weekHigh52, weekLow52: data.weekLow52,
     };
   });
 }
@@ -157,9 +134,9 @@ type Period = '1mo' | '3mo' | '6mo' | '1y' | '2y' | 'custom';
 function getPeriodStart(period: Period, customStart?: string): Date {
   const now = new Date();
   const d = new Date(now);
-  if (period === '1mo')  { d.setMonth(d.getMonth() - 1);   return d; }
-  if (period === '3mo')  { d.setMonth(d.getMonth() - 3);   return d; }
-  if (period === '6mo')  { d.setMonth(d.getMonth() - 6);   return d; }
+  if (period === '1mo')  { d.setMonth(d.getMonth() - 1);      return d; }
+  if (period === '3mo')  { d.setMonth(d.getMonth() - 3);      return d; }
+  if (period === '6mo')  { d.setMonth(d.getMonth() - 6);      return d; }
   if (period === '1y')   { d.setFullYear(d.getFullYear() - 1); return d; }
   if (period === '2y')   { d.setFullYear(d.getFullYear() - 2); return d; }
   if (period === 'custom' && customStart) return new Date(customStart);
@@ -173,18 +150,13 @@ export async function fetchHistory(
   customStart?: string
 ): Promise<HistoricalPoint[]> {
   const start = getPeriodStart(period, customStart);
-  const end = new Date();
   const period1 = Math.floor(start.getTime() / 1000);
-  const period2 = Math.floor(end.getTime() / 1000);
-
+  const period2 = Math.floor(Date.now() / 1000);
   const path = `/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&period1=${period1}&period2=${period2}`;
 
-  // Try query1, then query2
   let res = await fetch(`https://query1.finance.yahoo.com${path}`, { headers: HEADERS });
-  if (!res.ok) {
-    res = await fetch(`https://query2.finance.yahoo.com${path}`, { headers: HEADERS });
-  }
-  if (!res.ok) throw new Error(`Yahoo chart API ${symbol}: ${res.status}`);
+  if (!res.ok) res = await fetch(`https://query2.finance.yahoo.com${path}`, { headers: HEADERS });
+  if (!res.ok) throw new Error(`Yahoo chart ${symbol}: ${res.status}`);
 
   const data: YahooChartResponse = await res.json();
   const result = data.chart?.result?.[0];
