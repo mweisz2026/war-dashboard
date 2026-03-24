@@ -107,22 +107,78 @@ function scoreRelevance(title: string, summary?: string): number {
   return score;
 }
 
-export async function fetchNews(limit = 60): Promise<NewsItem[]> {
+// ── NewsAPI ───────────────────────────────────────────────────────────────────
+
+interface NewsAPIArticle {
+  title: string;
+  url: string;
+  source: { name: string };
+  publishedAt: string;
+  description?: string;
+}
+
+interface NewsAPIResponse {
+  status: string;
+  articles?: NewsAPIArticle[];
+}
+
+async function fetchFromNewsAPI(): Promise<NewsItem[]> {
+  const apiKey = process.env.NEWSAPI_KEY;
+  if (!apiKey) return [];
+
+  // Two targeted queries — war/conflict + commodity/market impact
+  const queries = [
+    'iran AND (israel OR houthi OR hormuz OR strike OR nuclear OR sanctions)',
+    'iran AND (oil OR crude OR commodity OR tanker OR shipping OR gold)',
+  ];
+
   const results = await Promise.allSettled(
-    FEEDS.map(async ({ url, source }) => {
-      const feed = await parser.parseURL(url);
-      return feed.items.map((item): NewsItem => ({
-        title: item.title ?? '',
-        url: item.link ?? item.guid ?? '#',
-        source,
-        publishedAt: item.pubDate ? new Date(item.pubDate).toISOString() : new Date().toISOString(),
-        summary: item.contentSnippet ?? item.content ?? '',
-      }));
-    })
+    queries.map(q =>
+      fetch(
+        `https://newsapi.org/v2/everything?q=${encodeURIComponent(q)}&sortBy=publishedAt&language=en&pageSize=50`,
+        { headers: { 'X-Api-Key': apiKey } }
+      ).then(r => r.json() as Promise<NewsAPIResponse>)
+    )
   );
 
-  const all: NewsItem[] = [];
+  const items: NewsItem[] = [];
   for (const r of results) {
+    if (r.status !== 'fulfilled' || r.value.status !== 'ok') continue;
+    for (const a of r.value.articles ?? []) {
+      if (!a.title || a.title === '[Removed]') continue;
+      items.push({
+        title: a.title,
+        url: a.url,
+        source: a.source.name,
+        publishedAt: a.publishedAt,
+        summary: a.description ?? '',
+      });
+    }
+  }
+  return items;
+}
+
+// ── Main export ───────────────────────────────────────────────────────────────
+
+export async function fetchNews(limit = 60): Promise<NewsItem[]> {
+  const [rssResults, newsApiItems] = await Promise.all([
+    Promise.allSettled(
+      FEEDS.map(async ({ url, source }) => {
+        const feed = await parser.parseURL(url);
+        return feed.items.map((item): NewsItem => ({
+          title: item.title ?? '',
+          url: item.link ?? item.guid ?? '#',
+          source,
+          publishedAt: item.pubDate ? new Date(item.pubDate).toISOString() : new Date().toISOString(),
+          summary: item.contentSnippet ?? item.content ?? '',
+        }));
+      })
+    ),
+    fetchFromNewsAPI(),
+  ]);
+
+  const all: NewsItem[] = [...newsApiItems];
+  for (const r of rssResults) {
     if (r.status === 'fulfilled') all.push(...r.value);
   }
 
